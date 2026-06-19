@@ -1,0 +1,14 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "Pseudocode Xrefs",
+    "entryPoint": "pseudocode_xrefs",
+    "categories": [
+      "decompilation",
+      "ui-ux-and-visualization"
+    ],
+    "idaVersions": ">=9.2",
+    "description": "Shows pseudocode xrefs with K and renders raw virtual calls as colored VTABLE slots whose byte offsets are available with J.",
+    "version": "1.1.1"
+  }
+}

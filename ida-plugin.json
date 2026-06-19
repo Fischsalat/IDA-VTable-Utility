@@ -1,0 +1,14 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "Pseudocode Xrefs",
+    "entryPoint": "pseudocode_xrefs",
+    "categories": [
+      "decompilation",
+      "ui-ux-and-visualization"
+    ],
+    "idaVersions": ">=9.2",
+    "description": "Shows pseudocode xrefs with K, resolves typed virtual calls to named methods, reports slots with I, renames targets with N, and jumps with J or double-click.",
+    "version": "1.3.1"
+  }
+}
