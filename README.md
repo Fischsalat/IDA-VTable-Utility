@@ -91,20 +91,28 @@ With named-method rendering enabled, place the cursor on the method name and:
 - Press `J` or double-click to jump to the implementation.
 - Press `N` to rename the function stored in that VTABLE slot.
 - Press `K` for the existing pseudocode xref action.
-- Press `X` on a resolved virtual-method token to list the selected class's base
-  and derived VTABLE implementations at that slot. Sibling class branches are
-  excluded. Each class occupies one row. Activating the Class cell opens Local
+- Press `X` on a resolved virtual-method token to list the declaration class
+  and its derived VTABLE implementations at that slot. Each class occupies one
+  row. Activating the Class cell opens Local
   Types, VTABLE jumps to the exact slot, Implementation opens pseudocode, and
   Address opens the target in disassembly.
+- Right-click a resolved virtual method and choose **Pseudocode Xrefs → Set
+  virtual method declaring class...** to record the first class that declares
+  that slot. `X` and hierarchy `N` renaming then include that class and its
+  descendants only. The boundary is stored in the IDB.
   `X` on all other pseudocode items remains IDA's native xref action.
 
 ### Inheritance-aware rename
 
-When `N` is used on a resolved method, the plugin reads IDA's base-class metadata
-and finds the connected inheritance hierarchy. The same slot is renamed in every
-named hierarchy VTABLE. Distinct implementations receive class-qualified names,
+When `N` is used with a plain name, the current static class is treated as the
+declaration class and only it and its descendants are renamed. Prefix the input
+with an ancestor and `::` (for example `AActor::Tick`) to declare the method at
+that ancestor and propagate through all of that ancestor's descendants. No
+ancestor is inspected unless explicitly selected this way. Distinct
+implementations receive class-qualified names,
 for example `AActor_Tick` and `ASomeActor_Tick`; shared implementations are
 renamed only once. Classes without a matching named VTABLE are skipped.
+Submitting an empty name removes the function names over the same boundary.
 
 Navigation remains exact to the object's static type. An `AActor *` call always
 uses `AActor_Vft[index]` for `J` and double-click, even when ancestors,

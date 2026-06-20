@@ -8,7 +8,7 @@
       "ui-ux-and-visualization"
     ],
     "idaVersions": ">=9.2",
-    "description": "Resolves typed virtual calls, navigates exact-class VTABLE slots, and handles inherited VTABLE implementations for rename and xrefs.",
-    "version": "1.5.0"
+    "description": "Resolves typed virtual calls and handles inherited VTABLE navigation, declaration boundaries, rename, and xrefs.",
+    "version": "1.7.1"
   }
 }

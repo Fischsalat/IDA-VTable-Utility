@@ -2,6 +2,7 @@
 #include <xref.hpp>
 #include <diskio.hpp>
 #include <fpro.h>
+#include <netnode.hpp>
 
 #include <cctype>
 #include <cstdlib>
@@ -27,6 +28,9 @@ constexpr char VTABLE_RENAME_ACTION_NAME[] = "pseudocode_xrefs:rename_vtable_tar
 constexpr char VTABLE_RENAME_ACTION_LABEL[] = "Rename VTABLE target";
 constexpr char VTABLE_XREF_ACTION_NAME[] = "pseudocode_xrefs:show_hierarchy_versions";
 constexpr char VTABLE_XREF_ACTION_LABEL[] = "Show hierarchy implementations";
+constexpr char VTABLE_DECLARING_ACTION_NAME[] = "pseudocode_xrefs:set_declaring_class";
+constexpr char VTABLE_DECLARING_ACTION_LABEL[] = "Set virtual method declaring class...";
+constexpr char DECLARATIONS_NODE_NAME[] = "$ pseudocode_xrefs declarations";
 
 struct vtable_marker_t
 {
@@ -272,6 +276,99 @@ void collect_class_lineage(
   }
 }
 
+void collect_descendant_hierarchy(
+      const qstring &declaring_class,
+      qvector<qstring> *class_names)
+{
+  inheritance_edges_t edges;
+  collect_inheritance_edges(&edges);
+  class_names->push_back(declaring_class);
+  for ( size_t cursor = 0; cursor < class_names->size(); ++cursor )
+  {
+    for ( const inheritance_edge_t &edge : edges )
+    {
+      if ( edge.base == (*class_names)[cursor]
+        && !contains_type_name(*class_names, edge.derived) )
+      {
+        class_names->push_back(edge.derived);
+      }
+    }
+  }
+}
+
+void collect_ancestor_hierarchy(
+      const qstring &selected_class,
+      qvector<qstring> *class_names)
+{
+  inheritance_edges_t edges;
+  collect_inheritance_edges(&edges);
+  class_names->push_back(selected_class);
+  for ( size_t cursor = 0; cursor < class_names->size(); ++cursor )
+  {
+    for ( const inheritance_edge_t &edge : edges )
+    {
+      if ( edge.derived == (*class_names)[cursor]
+        && !contains_type_name(*class_names, edge.base) )
+      {
+        class_names->push_back(edge.base);
+      }
+    }
+  }
+}
+
+ea_t get_class_vtable_entry(const qstring &class_name, uval_t slot)
+{
+  qstring vtable_name;
+  ea_t vtable_ea = BADADDR;
+  if ( !find_class_vtable(class_name, &vtable_name, &vtable_ea) )
+    return BADADDR;
+  const size_t pointer_size = inf_is_64bit() ? 8 : 4;
+  const ea_t entry_ea = vtable_ea + slot * pointer_size;
+  return is_loaded(entry_ea) ? entry_ea : BADADDR;
+}
+
+bool get_declaring_class(
+      const qstring &selected_class,
+      uval_t slot,
+      qstring *declaring_class)
+{
+  netnode declarations(DECLARATIONS_NODE_NAME);
+  qvector<qstring> ancestors;
+  collect_ancestor_hierarchy(selected_class, &ancestors);
+  for ( const qstring &candidate : ancestors )
+  {
+    const ea_t entry_ea = get_class_vtable_entry(candidate, slot);
+    if ( entry_ea != BADADDR
+      && declarations.supstr_ea(declaring_class, entry_ea) > 0 )
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool set_declaring_class_metadata(
+      const qstring &selected_class,
+      const qstring &declaring_class,
+      uval_t slot)
+{
+  netnode declarations;
+  declarations.create(DECLARATIONS_NODE_NAME);
+
+  qvector<qstring> connected;
+  collect_connected_hierarchy(selected_class, &connected);
+  for ( const qstring &class_name : connected )
+  {
+    const ea_t entry_ea = get_class_vtable_entry(class_name, slot);
+    if ( entry_ea != BADADDR )
+      declarations.supdel_ea(entry_ea);
+  }
+
+  const ea_t declaring_entry = get_class_vtable_entry(declaring_class, slot);
+  return declaring_entry != BADADDR
+      && declarations.supset_ea(declaring_entry, declaring_class.c_str());
+}
+
 qstring identifier_from_type_name(const qstring &type_name)
 {
   qstring result;
@@ -300,7 +397,11 @@ void collect_hierarchy_targets(
       size_t *vtable_count)
 {
   qvector<qstring> class_names;
-  collect_connected_hierarchy(selected_class, &class_names);
+  qstring declaring_class;
+  if ( get_declaring_class(selected_class, slot, &declaring_class) )
+    collect_descendant_hierarchy(declaring_class, &class_names);
+  else
+    collect_descendant_hierarchy(selected_class, &class_names);
   const size_t pointer_size = inf_is_64bit() ? 8 : 4;
   *vtable_count = 0;
   for ( const qstring &class_name : class_names )
@@ -345,7 +446,11 @@ void collect_all_hierarchy_targets(
       hierarchy_targets_t *targets)
 {
   qvector<qstring> class_names;
-  collect_class_lineage(selected_class, &class_names);
+  qstring declaring_class;
+  if ( get_declaring_class(selected_class, slot, &declaring_class) )
+    collect_descendant_hierarchy(declaring_class, &class_names);
+  else
+    collect_descendant_hierarchy(selected_class, &class_names);
   const size_t pointer_size = inf_is_64bit() ? 8 : 4;
   for ( const qstring &class_name : class_names )
   {
@@ -1150,6 +1255,29 @@ const int hierarchy_popup_t::widths[] = { 24, 28, 40, CHCOL_HEX | 16 };
 const char *const hierarchy_popup_t::headers[] =
   { "Class", "VTABLE", "Implementation", "Address" };
 
+struct declaring_class_popup_t final : chooser_t
+{
+  static const int widths[];
+  static const char *const headers[];
+  const qvector<qstring> &classes;
+
+  declaring_class_popup_t(const qvector<qstring> &classes_, const char *title_)
+    : chooser_t(CH_MODAL | CH_KEEP, 1, widths, headers, title_), classes(classes_)
+  {
+  }
+
+  size_t idaapi get_count() const override { return classes.size(); }
+
+  void idaapi get_row(
+        qstrvec_t *cols_, int *, chooser_item_attrs_t *, size_t n) const override
+  {
+    (*cols_)[0] = classes[n];
+  }
+};
+
+const int declaring_class_popup_t::widths[] = { 40 };
+const char *const declaring_class_popup_t::headers[] = { "First declaring class" };
+
 bool show_xrefs(vdui_t *vu)
 {
   if ( vu == nullptr || !vu->get_current_item(USE_KEYBOARD) )
@@ -1379,6 +1507,30 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
   };
 
+  struct set_declaring_class_action_t final : action_handler_t
+  {
+    pseudocode_xrefs_plugmod_t *plugin;
+
+    explicit set_declaring_class_action_t(pseudocode_xrefs_plugmod_t *plugin_)
+      : plugin(plugin_)
+    {
+    }
+
+    int idaapi activate(action_activation_ctx_t *ctx) override
+    {
+      if ( ctx == nullptr || ctx->widget_type != BWN_PSEUDOCODE )
+        return 0;
+      return plugin->set_declaring_class(get_widget_vdui(ctx->widget)) ? 1 : 0;
+    }
+
+    action_state_t idaapi update(action_update_ctx_t *ctx) override
+    {
+      return ctx != nullptr && ctx->widget_type == BWN_PSEUDOCODE
+           ? AST_ENABLE_FOR_WIDGET
+           : AST_DISABLE_FOR_WIDGET;
+    }
+  };
+
   qmap<ea_t, vtable_markers_t> vtable_markers;
   ui_listener_t ui_listener;
   view_listener_t view_listener;
@@ -1386,6 +1538,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
   show_vtable_index_action_t show_vtable_index_action;
   rename_vtable_target_action_t rename_vtable_target_action;
   hierarchy_xrefs_action_t hierarchy_xrefs_action;
+  set_declaring_class_action_t set_declaring_class_action;
   qstring native_xref_shortcut;
 
   pseudocode_xrefs_plugmod_t()
@@ -1394,7 +1547,8 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       jump_vtable_target_action(this),
       show_vtable_index_action(this),
       rename_vtable_target_action(this),
-      hierarchy_xrefs_action(this)
+      hierarchy_xrefs_action(this),
+      set_declaring_class_action(this)
   {
     const action_desc_t xref_desc = ACTION_DESC_LITERAL_PLUGMOD(
       ACTION_NAME,
@@ -1468,13 +1622,24 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       native_xref_shortcut.clear();
     }
 
+    const action_desc_t declaring_desc = ACTION_DESC_LITERAL_PLUGMOD(
+      VTABLE_DECLARING_ACTION_NAME,
+      VTABLE_DECLARING_ACTION_LABEL,
+      &set_declaring_class_action,
+      this,
+      nullptr,
+      "Set the first class that declares this virtual method slot",
+      -1);
+    if ( !register_action(declaring_desc) )
+      msg("%s: failed to register action %s\n", PLUGIN.wanted_name, VTABLE_DECLARING_ACTION_NAME);
+
     if ( !install_hexrays_callback(decompiler_callback, this) )
       msg("%s: failed to install the pseudocode keyboard callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_VIEW, &view_listener) )
       msg("%s: failed to install the pseudocode mouse callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_UI, &ui_listener) )
       msg("%s: failed to install the pseudocode rename callback\n", PLUGIN.wanted_name);
-    debug_log("plugin initialized: version=1.5.0");
+    debug_log("plugin initialized: version=1.7.1");
   }
 
   ~pseudocode_xrefs_plugmod_t() override
@@ -1687,22 +1852,6 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       return true;
     }
 
-    hierarchy_targets_t targets;
-    size_t vtable_count = 0;
-    collect_hierarchy_targets(
-      selected_class,
-      marker->slot,
-      &targets,
-      &vtable_count);
-    if ( targets.empty() )
-    {
-      warning(
-        "No mapped functions found at VTABLE[0x%" FMT_64 "X] in the %s hierarchy",
-        uint64(marker->slot),
-        selected_class.c_str());
-      return true;
-    }
-
     ea_t selected_target = marker->target;
     if ( selected_target == BADADDR
       && !get_vtable_entry_target(vu->cfunc, *marker, &selected_target) )
@@ -1724,18 +1873,85 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     if ( display.rfind(selected_prefix, 0) == 0 )
       display.erase(0, selected_prefix.length());
     new_name = display.c_str();
-    if ( !ask_ident(
+    if ( !ask_str(
           &new_name,
-          "Rename method at VTABLE[0x%" FMT_64 "X] across %" FMT_Z " named hierarchy VTABLEs",
-          uint64(marker->slot),
-          vtable_count) )
+          HIST_IDENT,
+          "Rename VTABLE[0x%" FMT_64 "X]. Prefix with AncestorClass:: to set its declaration boundary.",
+          uint64(marker->slot)) )
     {
       return true;
     }
 
+    qstring declaring_class = selected_class;
+    qstring method_name = new_name;
+    qvector<qstring> ancestors;
+    collect_ancestor_hierarchy(selected_class, &ancestors);
+    size_t matched_prefix_length = 0;
+    for ( const qstring &ancestor : ancestors )
+    {
+      qstring prefix = ancestor;
+      prefix.append("::");
+      if ( new_name.length() > prefix.length()
+        && strncmp(new_name.c_str(), prefix.c_str(), prefix.length()) == 0
+        && prefix.length() > matched_prefix_length )
+      {
+        declaring_class = ancestor;
+        method_name = new_name.substr(prefix.length());
+        matched_prefix_length = prefix.length();
+      }
+    }
+    if ( matched_prefix_length == 0 && strstr(new_name.c_str(), "::") != nullptr )
+    {
+      warning(
+        "The rename prefix must be the current class or one of its ancestors");
+      return true;
+    }
+    if ( !set_declaring_class_metadata(
+          selected_class,
+          declaring_class,
+          marker->slot) )
+    {
+      warning(
+        "Could not set %s as the declaration boundary for VTABLE[0x%" FMT_64 "X]",
+        declaring_class.c_str(),
+        uint64(marker->slot));
+      return true;
+    }
+
+    hierarchy_targets_t targets;
+    size_t vtable_count = 0;
+    collect_hierarchy_targets(
+      selected_class,
+      marker->slot,
+      &targets,
+      &vtable_count);
+    if ( targets.empty() )
+    {
+      warning(
+        "No mapped functions found at or below %s for VTABLE[0x%" FMT_64 "X]",
+        declaring_class.c_str(),
+        uint64(marker->slot));
+      return true;
+    }
+    new_name = method_name;
+
     size_t renamed_count = 0;
     for ( const hierarchy_target_t &entry : targets )
     {
+      if ( new_name.empty() )
+      {
+        if ( del_global_name(entry.target) )
+        {
+          ++renamed_count;
+          debug_log(
+            "N hierarchy unname: class=%s vtable=%s slot=0x%" FMT_64 "X target=%a",
+            entry.class_name.c_str(),
+            entry.vtable_name.c_str(),
+            uint64(marker->slot),
+            entry.target);
+        }
+        continue;
+      }
       qstring applied_name;
       if ( targets.size() == 1 )
       {
@@ -1761,15 +1977,25 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
     if ( renamed_count == 0 )
     {
-      warning("Could not rename any functions in the %s hierarchy", selected_class.c_str());
+      warning(
+        new_name.empty()
+          ? "Could not remove any function names in the %s hierarchy"
+          : "Could not rename any functions in the %s hierarchy",
+        selected_class.c_str());
       return true;
     }
-    msg(
-      "Pseudocode Xrefs: renamed %" FMT_Z " implementations at slot 0x%" FMT_64
-      " across %" FMT_Z " named VTABLEs\n",
-      renamed_count,
-      uint64(marker->slot),
-      vtable_count);
+    if ( new_name.empty() )
+      msg(
+        "Pseudocode Xrefs: removed %" FMT_Z " implementation names at slot 0x%" FMT_64 "\n",
+        renamed_count,
+        uint64(marker->slot));
+    else
+      msg(
+        "Pseudocode Xrefs: renamed %" FMT_Z " implementations at slot 0x%" FMT_64
+        " across %" FMT_Z " named VTABLEs\n",
+        renamed_count,
+        uint64(marker->slot),
+        vtable_count);
     vu->cfunc->refresh_func_ctext();
     return true;
   }
@@ -1834,6 +2060,56 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
         jump_to_disassembly(entry.target);
         break;
     }
+    return true;
+  }
+
+  bool set_declaring_class(vdui_t *vu)
+  {
+    vtable_marker_t fallback;
+    const vtable_marker_t *marker = find_vtable_marker(vu, USE_KEYBOARD, &fallback);
+    if ( marker == nullptr )
+      return false;
+
+    qstring selected_class, vtable_name;
+    ea_t vtable_ea = BADADDR;
+    if ( !find_object_vtable(
+          vu->cfunc,
+          marker->object_name,
+          &selected_class,
+          &vtable_name,
+          &vtable_ea) )
+    {
+      return false;
+    }
+
+    qvector<qstring> ancestors;
+    collect_ancestor_hierarchy(selected_class, &ancestors);
+    qstring title;
+    title.sprnt(
+      "Set declaring class for VTABLE[0x%" FMT_64 "X]",
+      uint64(marker->slot));
+    declaring_class_popup_t popup(ancestors, title.c_str());
+    const ssize_t selected = popup.choose();
+    if ( selected < 0 || selected >= ancestors.size() )
+      return true;
+
+    const qstring &declaring_class = ancestors[selected];
+    if ( !set_declaring_class_metadata(
+          selected_class,
+          declaring_class,
+          marker->slot) )
+    {
+      warning(
+        "Could not store declaring class '%s' for VTABLE[0x%" FMT_64 "X]",
+        declaring_class.c_str(),
+        uint64(marker->slot));
+      return true;
+    }
+
+    msg(
+      "Pseudocode Xrefs: VTABLE[0x%" FMT_64 "X] is first declared by %s\n",
+      uint64(marker->slot),
+      declaring_class.c_str());
     return true;
   }
 
@@ -1980,6 +2256,21 @@ ssize_t idaapi decompiler_callback(
       vu,
       vu != nullptr && vu->cfunc != nullptr ? vu->cfunc->entry_ea : BADADDR);
     return plugin->jump_to_vtable_target(vu, USE_MOUSE, false) ? 1 : 0;
+  }
+
+  if ( event == hxe_populating_popup )
+  {
+    TWidget *widget = va_arg(va, TWidget *);
+    TPopupMenu *popup = va_arg(va, TPopupMenu *);
+    vdui_t *vu = va_arg(va, vdui_t *);
+    vtable_marker_t fallback;
+    if ( plugin->find_vtable_marker(vu, USE_KEYBOARD, &fallback) != nullptr )
+      attach_action_to_popup(
+        widget,
+        popup,
+        VTABLE_DECLARING_ACTION_NAME,
+        "Pseudocode Xrefs/");
+    return 0;
   }
 
   if ( event != hxe_keyboard )
