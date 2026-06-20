@@ -5,6 +5,7 @@
 #include <netnode.hpp>
 
 #include <cctype>
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 
@@ -40,8 +41,10 @@ struct vtable_marker_t
   uval_t byte_offset = 0;
   uval_t slot = 0;
   qstring object_name;
+  qstring class_name_override;
   ea_t target = BADADDR;
   qstring display_name;
+  bool assignment_reference = false;
 };
 
 using vtable_markers_t = qvector<vtable_marker_t>;
@@ -106,6 +109,22 @@ bool find_object_vtable(
   return find_class_vtable(*class_name, vtable_name, vtable_ea);
 }
 
+bool find_marker_vtable(
+      cfunc_t *cfunc,
+      const vtable_marker_t &marker,
+      qstring *class_name,
+      qstring *vtable_name,
+      ea_t *vtable_ea)
+{
+  if ( !marker.class_name_override.empty() )
+  {
+    *class_name = marker.class_name_override;
+    return find_class_vtable(*class_name, vtable_name, vtable_ea);
+  }
+  return find_object_vtable(
+    cfunc, marker.object_name, class_name, vtable_name, vtable_ea);
+}
+
 bool get_vtable_entry_target(
       cfunc_t *cfunc,
       const vtable_marker_t &marker,
@@ -114,9 +133,9 @@ bool get_vtable_entry_target(
   qstring class_name;
   qstring vtable_name;
   ea_t vtable_ea = BADADDR;
-  if ( !find_object_vtable(
+  if ( !find_marker_vtable(
         cfunc,
-        marker.object_name,
+        marker,
         &class_name,
         &vtable_name,
         &vtable_ea) )
@@ -808,6 +827,196 @@ bool rewrite_vtable_line(
   return changed;
 }
 
+struct indirect_vtable_binding_t
+{
+  std::string variable;
+  qstring object_name;
+  qstring class_name_override;
+  uval_t byte_offset = 0;
+  int assignment_line = -1;
+  int variable_column = 0;
+  int expression_start = 0;
+  int expression_end = 0;
+};
+
+bool parse_integer_literal(
+      const std::string &plain,
+      size_t *cursor,
+      uval_t *value)
+{
+  while ( *cursor < plain.size() && std::isspace(uchar(plain[*cursor])) != 0 )
+    ++*cursor;
+  const size_t begin = *cursor;
+  if ( *cursor + 2 <= plain.size()
+    && plain[*cursor] == '0'
+    && (plain[*cursor + 1] == 'x' || plain[*cursor + 1] == 'X') )
+  {
+    *cursor += 2;
+    while ( *cursor < plain.size()
+         && std::isxdigit(uchar(plain[*cursor])) != 0 )
+      ++*cursor;
+  }
+  else
+  {
+    while ( *cursor < plain.size() && std::isdigit(uchar(plain[*cursor])) != 0 )
+      ++*cursor;
+  }
+  if ( *cursor == begin || (*cursor == begin + 2 && plain[begin] == '0') )
+    return false;
+  const std::string number = plain.substr(begin, *cursor - begin);
+  *value = uval_t(::strtoull(number.c_str(), nullptr, 0));
+  while ( *cursor < plain.size()
+       && (plain[*cursor] == 'u' || plain[*cursor] == 'U'
+        || plain[*cursor] == 'l' || plain[*cursor] == 'L') )
+    ++*cursor;
+  return true;
+}
+
+bool find_vtable_assignment(
+      const std::string &plain,
+      indirect_vtable_binding_t *binding)
+{
+  const size_t equals = plain.find('=');
+  if ( equals == std::string::npos )
+    return false;
+  size_t lhs_end = equals;
+  while ( lhs_end > 0 && std::isspace(uchar(plain[lhs_end - 1])) != 0 )
+    --lhs_end;
+  size_t lhs_start = lhs_end;
+  while ( lhs_start > 0 && is_identifier_char(plain[lhs_start - 1]) )
+    --lhs_start;
+  if ( lhs_start == lhs_end || !is_identifier_start(plain[lhs_start]) )
+    return false;
+
+  size_t marker = plain.find("*(", equals + 1);
+  if ( marker == std::string::npos )
+    return false;
+  size_t cursor = marker + 2;
+  bool raw_void_form = false;
+  if ( cursor < plain.size() && plain[cursor] == '*' )
+  {
+    raw_void_form = true;
+    ++cursor;
+  }
+  if ( cursor >= plain.size() || !is_identifier_start(plain[cursor]) )
+    return false;
+  const size_t object_start = cursor++;
+  while ( cursor < plain.size() && is_identifier_char(plain[cursor]) )
+    ++cursor;
+  const size_t object_end = cursor;
+
+  if ( !raw_void_form )
+  {
+    if ( cursor + 2 > plain.size() || plain.compare(cursor, 2, "->") != 0 )
+      return false;
+    cursor += 2;
+    const size_t member_start = cursor;
+    while ( cursor < plain.size() && is_identifier_char(plain[cursor]) )
+      ++cursor;
+    std::string member = plain.substr(member_start, cursor - member_start);
+    for ( char &c : member )
+      c = char(std::tolower(uchar(c)));
+    if ( member != "vtable" && member != "vftable" )
+      return false;
+  }
+
+  while ( cursor < plain.size() && std::isspace(uchar(plain[cursor])) != 0 )
+    ++cursor;
+  if ( cursor >= plain.size() || plain[cursor++] != '+' )
+    return false;
+  uval_t offset = 0;
+  if ( !parse_integer_literal(plain, &cursor, &offset) )
+    return false;
+  while ( cursor < plain.size() && std::isspace(uchar(plain[cursor])) != 0 )
+    ++cursor;
+  if ( cursor >= plain.size() || plain[cursor] != ')' )
+    return false;
+  ++cursor;
+
+  binding->variable = plain.substr(lhs_start, lhs_end - lhs_start);
+  binding->object_name = plain.substr(object_start, object_end - object_start).c_str();
+  binding->byte_offset = raw_void_form
+    ? offset
+    : offset * (inf_is_64bit() ? 8 : 4);
+  binding->variable_column = int(lhs_start);
+  binding->expression_start = int(marker);
+  binding->expression_end = int(cursor);
+  return binding->byte_offset % (inf_is_64bit() ? 8 : 4) == 0;
+}
+
+qstring infer_containing_class(cfunc_t *cfunc)
+{
+  qstring function_name = get_short_name(cfunc->entry_ea);
+  std::string name(function_name.c_str());
+  const size_t separator = name.rfind("::");
+  if ( separator == std::string::npos )
+    return qstring();
+  qstring candidate = name.substr(0, separator).c_str();
+  qstring vtable_name;
+  ea_t vtable_ea = BADADDR;
+  return find_class_vtable(candidate, &vtable_name, &vtable_ea)
+       ? candidate
+       : qstring();
+}
+
+void collect_indirect_vtable_markers(
+      cfunc_t *cfunc,
+      vtable_markers_t *markers)
+{
+  qvector<indirect_vtable_binding_t> bindings;
+  const size_t pointer_size = inf_is_64bit() ? 8 : 4;
+  for ( int line_number = 0; line_number < cfunc->sv.size(); ++line_number )
+  {
+    qstring plain_qstr;
+    tag_remove(&plain_qstr, cfunc->sv[line_number].line);
+    indirect_vtable_binding_t binding;
+    if ( !find_vtable_assignment(plain_qstr.c_str(), &binding) )
+      continue;
+    binding.assignment_line = line_number;
+
+    qstring class_name, vtable_name;
+    ea_t vtable_ea = BADADDR;
+    if ( !find_object_vtable(
+          cfunc, binding.object_name, &class_name, &vtable_name, &vtable_ea) )
+      binding.class_name_override = infer_containing_class(cfunc);
+    if ( binding.class_name_override.empty() && class_name.empty() )
+      continue;
+    bindings.push_back(binding);
+  }
+
+  for ( const indirect_vtable_binding_t &binding : bindings )
+  {
+    for ( int line_number = binding.assignment_line;
+          line_number < cfunc->sv.size();
+          ++line_number )
+    {
+      qstring plain_qstr;
+      tag_remove(&plain_qstr, cfunc->sv[line_number].line);
+      const std::string plain(plain_qstr.c_str());
+      size_t token = line_number == binding.assignment_line
+                   ? size_t(binding.expression_start)
+                   : plain.find(binding.variable + "(");
+      if ( token == std::string::npos )
+        continue;
+      if ( line_number != binding.assignment_line
+        && token > 0 && is_identifier_char(plain[token - 1]) )
+        continue;
+
+      vtable_marker_t &marker = markers->push_back();
+      marker.line = line_number;
+      marker.start_column = int(token);
+      marker.end_column = line_number == binding.assignment_line
+        ? binding.expression_end
+        : int(token + binding.variable.length());
+      marker.byte_offset = binding.byte_offset;
+      marker.slot = binding.byte_offset / pointer_size;
+      marker.object_name = binding.object_name;
+      marker.class_name_override = binding.class_name_override;
+      marker.assignment_reference = line_number == binding.assignment_line;
+    }
+  }
+}
+
 bool normalize_vtable_colors(simpleline_t *line)
 {
   qstring plain_qstr;
@@ -946,11 +1155,19 @@ void apply_named_vtable_tokens(cfunc_t *cfunc, vtable_markers_t *markers)
     qvector<vtable_marker_t *> line_markers;
     for ( vtable_marker_t &marker : *markers )
     {
-      if ( marker.line == line_number && !marker.display_name.empty() )
+      if ( marker.line == line_number
+        && (!marker.display_name.empty() || marker.assignment_reference) )
         line_markers.push_back(&marker);
     }
     if ( line_markers.empty() )
       continue;
+    std::sort(
+      line_markers.begin(),
+      line_markers.end(),
+      [](const vtable_marker_t *left, const vtable_marker_t *right)
+      {
+        return left->start_column < right->start_column;
+      });
 
     simpleline_t &line = cfunc->sv[line_number];
     const qstring original = line.line;
@@ -964,11 +1181,60 @@ void apply_named_vtable_tokens(cfunc_t *cfunc, vtable_markers_t *markers)
       const char *raw_previous = tag_advance(original.c_str(), previous_column);
       const char *raw_start = tag_advance(original.c_str(), old_start);
       rewritten.append(raw_previous, raw_start - raw_previous);
-      append_colored(&rewritten, marker->display_name.c_str(), SCOLOR_CODNAME);
 
-      marker->start_column = old_start + column_delta;
-      marker->end_column = marker->start_column + int(marker->display_name.length());
-      column_delta += int(marker->display_name.length()) - (old_end - old_start);
+      qstring replacement;
+      if ( marker->assignment_reference )
+      {
+        replacement = "&";
+        replacement.append(marker->object_name);
+        replacement.append("->");
+        if ( !marker->display_name.empty() )
+        {
+          replacement.append(marker->display_name);
+        }
+        else
+        {
+          replacement.append("VTABLE[0x");
+          replacement.cat_sprnt("%" FMT_64 "X]", uint64(marker->slot));
+        }
+      }
+      else
+      {
+        replacement = marker->display_name;
+      }
+      if ( marker->assignment_reference )
+      {
+        append_colored(&rewritten, "&", SCOLOR_SYMBOL);
+        const char object_color_value =
+          find_identifier_color(original, marker->object_name.c_str(), old_start);
+        const char object_color[] = { object_color_value, '\0' };
+        append_colored(&rewritten, marker->object_name.c_str(), object_color);
+        append_colored(&rewritten, "->", SCOLOR_SYMBOL);
+        if ( !marker->display_name.empty() )
+        {
+          append_colored(&rewritten, marker->display_name.c_str(), SCOLOR_CODNAME);
+        }
+        else
+        {
+          append_colored(&rewritten, "VTABLE", SCOLOR_DEFAULT);
+          append_colored(&rewritten, "[", SCOLOR_SYMBOL);
+          qstring slot_text;
+          slot_text.sprnt("0x%" FMT_64 "X", uint64(marker->slot));
+          append_colored(&rewritten, slot_text.c_str(), SCOLOR_NUMBER);
+          append_colored(&rewritten, "]", SCOLOR_SYMBOL);
+        }
+      }
+      else
+      {
+        append_colored(&rewritten, replacement.c_str(), SCOLOR_CODNAME);
+      }
+
+      const int replacement_start = old_start + column_delta;
+      marker->start_column = marker->assignment_reference
+        ? replacement_start + int(marker->object_name.length()) + 3
+        : replacement_start;
+      marker->end_column = replacement_start + int(replacement.length());
+      column_delta += int(replacement.length()) - (old_end - old_start);
       previous_column = old_end;
     }
     rewritten.append(tag_advance(original.c_str(), previous_column));
@@ -1067,11 +1333,26 @@ bool vtable_rewrite_self_test()
   const std::string colored_number =
     std::string(SCOLOR_ON) + SCOLOR_NUMBER + "0x2"
     + SCOLOR_OFF + SCOLOR_NUMBER;
+  indirect_vtable_binding_t typed_binding;
+  indirect_vtable_binding_t raw_binding;
+  const bool indirect_patterns_ok =
+    find_vtable_assignment(
+      "v19 = *(this->VTable + 0x163);", &typed_binding)
+    && typed_binding.variable == "v19"
+    && typed_binding.object_name == "this"
+    && typed_binding.byte_offset == 0xB18
+    && find_vtable_assignment(
+      "v19 = *(*this + 0xB18LL);", &raw_binding)
+    && raw_binding.variable == "v19"
+    && raw_binding.object_name == "this"
+    && raw_binding.byte_offset == 0xB18;
+
   return raw.find(colored_object) != std::string::npos
       && raw.find(colored_name) != std::string::npos
       && raw.find(colored_number) != std::string::npos
       && markers[0].byte_offset == 0x10
-      && markers[0].slot == 2;
+      && markers[0].slot == 2
+      && indirect_patterns_ok;
 }
 
 struct xref_entry_t
@@ -1639,7 +1920,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       msg("%s: failed to install the pseudocode mouse callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_UI, &ui_listener) )
       msg("%s: failed to install the pseudocode rename callback\n", PLUGIN.wanted_name);
-    debug_log("plugin initialized: version=1.7.2");
+    debug_log("plugin initialized: version=1.8.2");
   }
 
   ~pseudocode_xrefs_plugmod_t() override
@@ -1667,6 +1948,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
         line_number,
         &markers);
     }
+    collect_indirect_vtable_markers(cfunc, &markers);
     if ( markers.empty() )
       collect_named_vtable_markers(cfunc, &markers);
     else
@@ -1841,9 +2123,9 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     qstring selected_class;
     qstring selected_vtable;
     ea_t selected_vtable_ea = BADADDR;
-    if ( !find_object_vtable(
+    if ( !find_marker_vtable(
           vu->cfunc,
-          marker->object_name,
+          *marker,
           &selected_class,
           &selected_vtable,
           &selected_vtable_ea) )
@@ -2009,9 +2291,9 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
 
     qstring selected_class, vtable_name;
     ea_t vtable_ea = BADADDR;
-    if ( !find_object_vtable(
+    if ( !find_marker_vtable(
           vu->cfunc,
-          marker->object_name,
+          *marker,
           &selected_class,
           &vtable_name,
           &vtable_ea) )
@@ -2072,9 +2354,9 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
 
     qstring selected_class, vtable_name;
     ea_t vtable_ea = BADADDR;
-    if ( !find_object_vtable(
+    if ( !find_marker_vtable(
           vu->cfunc,
-          marker->object_name,
+          *marker,
           &selected_class,
           &vtable_name,
           &vtable_ea) )
@@ -2136,58 +2418,16 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       uint64(marker->slot),
       uint64(marker->byte_offset));
 
-    const lvars_t *lvars = vu->cfunc->get_lvars();
-    const lvar_t *object_lvar = nullptr;
-    for ( const lvar_t &lvar : *lvars )
-    {
-      if ( lvar.name == marker->object_name )
-      {
-        object_lvar = &lvar;
-        break;
-      }
-    }
-    if ( object_lvar == nullptr )
-    {
-      debug_log("J navigation failed: lvar '%s' not found", marker->object_name.c_str());
-      warning("Could not find the variable '%s'", marker->object_name.c_str());
-      return true;
-    }
-
-    tinfo_t object_type = object_lvar->type();
-    debug_log(
-      "J object type: variable=%s type=%s",
-      marker->object_name.c_str(),
-      object_type.dstr());
-    if ( !object_type.is_ptr() || !object_type.remove_ptr_or_array() )
-    {
-      warning(
-        "Variable '%s' is not typed as a pointer to a class",
-        marker->object_name.c_str());
-      return true;
-    }
-
     qstring class_name;
-    if ( !object_type.get_type_name(&class_name)
-      && !object_type.get_final_type_name(&class_name) )
+    qstring vtable_name;
+    ea_t vtable_ea = BADADDR;
+    if ( !find_marker_vtable(
+          vu->cfunc, *marker, &class_name, &vtable_name, &vtable_ea) )
     {
       warning(
-        "Could not determine the class type of '%s'",
+        "Could not determine a class VTABLE for '%s'",
         marker->object_name.c_str());
       return true;
-    }
-
-    qstring vtable_name = class_name;
-    vtable_name.append("_vft");
-    ea_t vtable_ea = get_name_ea(BADADDR, vtable_name.c_str());
-    if ( vtable_ea == BADADDR )
-    {
-      const char *separator = strrchr(class_name.c_str(), ':');
-      if ( separator != nullptr )
-      {
-        vtable_name = separator + 1;
-        vtable_name.append("_vft");
-        vtable_ea = get_name_ea(BADADDR, vtable_name.c_str());
-      }
     }
     debug_log(
       "J vtable resolved: class=%s symbol=%s ea=%a",

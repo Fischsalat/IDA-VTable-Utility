@@ -123,6 +123,14 @@ exists, placing the cursor on `object->VTABLE[index]` and pressing `J`, or
 double-clicking that token, reads the vtable entry and jumps to the referenced
 function.
 
+Split indirect calls are also recognized. Assignments such as
+`v19 = *(this->VTable + 0x163)` and `v19 = *(*this + 0xB18LL)` attach slot
+metadata to `v19`; later `v19(...)` calls support the same display, navigation,
+index, xref, and rename actions. For `void *this`, the class is inferred from a
+containing `Class::Method` when `Class_Vft` exists.
+The assignment is rendered as `v19 = &this->VTABLE[index]`, or as
+`v19 = &this->FunctionName` when the slot target is named.
+
 Diagnostic information for `J` navigation is appended to
 `%APPDATA%\Hex-Rays\IDA Pro\pseudocode_xrefs.log`.
 
