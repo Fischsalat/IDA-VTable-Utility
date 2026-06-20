@@ -1,0 +1,6 @@
+actions=['pseudocode_xrefs:show_hierarchy_versions', 'pseudocode_xrefs:show_hierarchy_versions']
+method=('method', 'AActor hierarchy: VTABLE[0x2] implementations', [['AActor', 'AActor_Vft', 'demo_method_1', '140001020'], ['UObject', 'UObject_Vft', 'demo_method_0', '140001000'], ['ASomeActor', 'ASomeActor_Vft', 'demo_method_2', '140001040']])
+global=('global', 'xrefs to g_vtable_addend', [['Down', 'o', 'invoke_raw_vtable_slot_2+A', 'lea     rdx, g_vtable_addend'], ['Down', 'o', 'invoke_vtable_slot_2+A', 'lea     rdx, g_vtable_addend']])
+method_ok=True
+native_ok=True
+ok=True

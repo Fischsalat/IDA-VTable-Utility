@@ -1,0 +1,6 @@
+results=[(0, 58, 'Local Types: Types Layout', 5368713360), (1, 27, 'IDA View-A', 5368852784), (2, 46, 'Pseudocode-A', 5368713248), (3, 27, 'IDA View-A', 5368713248)]
+class_ok=True
+vtable_ok=True
+implementation_ok=True
+address_ok=True
+ok=True
