@@ -9,6 +9,6 @@
     ],
     "idaVersions": ">=9.2",
     "description": "Resolves typed virtual calls and handles inherited VTABLE navigation, declaration boundaries, rename, and xrefs.",
-    "version": "1.7.1"
+    "version": "1.7.2"
   }
 }

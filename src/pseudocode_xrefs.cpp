@@ -1639,7 +1639,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       msg("%s: failed to install the pseudocode mouse callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_UI, &ui_listener) )
       msg("%s: failed to install the pseudocode rename callback\n", PLUGIN.wanted_name);
-    debug_log("plugin initialized: version=1.7.1");
+    debug_log("plugin initialized: version=1.7.2");
   }
 
   ~pseudocode_xrefs_plugmod_t() override
@@ -1986,12 +1986,12 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
     if ( new_name.empty() )
       msg(
-        "Pseudocode Xrefs: removed %" FMT_Z " implementation names at slot 0x%" FMT_64 "\n",
+        "Pseudocode Xrefs: removed %" FMT_Z " implementation names at slot 0x%" FMT_64 "X\n",
         renamed_count,
         uint64(marker->slot));
     else
       msg(
-        "Pseudocode Xrefs: renamed %" FMT_Z " implementations at slot 0x%" FMT_64
+        "Pseudocode Xrefs: renamed %" FMT_Z " implementations at slot 0x%" FMT_64 "X"
         " across %" FMT_Z " named VTABLEs\n",
         renamed_count,
         uint64(marker->slot),
