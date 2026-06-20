@@ -15,6 +15,8 @@ type, its matching `TypeName_vft`/`TypeName_Vft` symbol exists, and the selected
 entry points to a named function, the token is rendered using that function's
 name instead (for example, `object->demo_method_2(...)`).
 
+Typed forms such as `(*(object->VTable + 2))(...)` are recognized as well.
+
 ## Requirements
 
 - IDA Pro 9.2 or newer with a Hex-Rays decompiler
@@ -58,6 +60,8 @@ The repository includes:
 - `demo/pseudocode_xrefs_complex_args_demo.i64`, a typed-object database whose
   raw virtual call passes both `&g_vtable_addend` and the `scale_value` function
   pointer.
+- `demo/pseudocode_xrefs_inheritance_demo.i64`, an inheritance database with
+  `UObject`, `AActor`, `ASomeActor`, and `USomeNetClass`, each with a named VTABLE.
 
 Open the `.i64` file, decompile `main`, place the cursor on a function or global
 item, and press `K`.
@@ -87,6 +91,24 @@ With named-method rendering enabled, place the cursor on the method name and:
 - Press `J` or double-click to jump to the implementation.
 - Press `N` to rename the function stored in that VTABLE slot.
 - Press `K` for the existing pseudocode xref action.
+- Press `X` on a resolved virtual-method token to list the selected class's base
+  and derived VTABLE implementations at that slot. Sibling class branches are
+  excluded. Each class occupies one row. Activating the Class cell opens Local
+  Types, VTABLE jumps to the exact slot, Implementation opens pseudocode, and
+  Address opens the target in disassembly.
+  `X` on all other pseudocode items remains IDA's native xref action.
+
+### Inheritance-aware rename
+
+When `N` is used on a resolved method, the plugin reads IDA's base-class metadata
+and finds the connected inheritance hierarchy. The same slot is renamed in every
+named hierarchy VTABLE. Distinct implementations receive class-qualified names,
+for example `AActor_Tick` and `ASomeActor_Tick`; shared implementations are
+renamed only once. Classes without a matching named VTABLE are skipped.
+
+Navigation remains exact to the object's static type. An `AActor *` call always
+uses `AActor_Vft[index]` for `J` and double-click, even when ancestors,
+descendants, or sibling classes override the same slot.
 
 If the object is typed as `SomeType *` and a symbol named `SomeType_vft`
 exists, placing the cursor on `object->VTABLE[index]` and pressing `J`, or

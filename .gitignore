@@ -23,4 +23,9 @@
 /tools/check_rename_vtable.log
 /tools/check_rename_vtable.txt
 /demo/pseudocode_xrefs_rename_test.i64
+/tools/setup_inheritance_demo.log
+/tools/setup_inheritance_demo.txt
+/tools/check_inheritance.log
+/tools/check_inheritance.txt
+/demo/pseudocode_xrefs_inheritance_test.i64
 /.ida-user-test/
