@@ -29,3 +29,5 @@
 /tools/check_inheritance.txt
 /demo/pseudocode_xrefs_inheritance_test.i64
 /.ida-user-test/
+/backups/
+/demo/
