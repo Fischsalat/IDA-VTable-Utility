@@ -1,14 +1,14 @@
 {
   "IDAMetadataDescriptorVersion": 1,
   "plugin": {
-    "name": "Pseudocode Xrefs",
+    "name": "IDA-VTable-Utility",
     "entryPoint": "pseudocode_xrefs",
     "categories": [
       "decompilation",
       "ui-ux-and-visualization"
     ],
     "idaVersions": ">=9.2",
-    "description": "Resolves typed virtual calls and handles inherited VTABLE navigation, declaration boundaries, rename, and xrefs.",
-    "version": "1.10.5"
+    "description": "Recognizes virtual calls and provides inheritance-aware VTable navigation, renaming, prototypes, and cross-references.",
+    "version": "1.11.0"
   }
 }

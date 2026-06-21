@@ -2197,7 +2197,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       msg("%s: failed to install the pseudocode mouse callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_UI, &ui_listener) )
       msg("%s: failed to install the pseudocode rename callback\n", PLUGIN.wanted_name);
-    debug_log("plugin initialized: version=1.10.5");
+    debug_log("plugin initialized: version=1.11.0");
   }
 
   ~pseudocode_xrefs_plugmod_t() override
@@ -2588,12 +2588,12 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
     if ( new_name.empty() )
       msg(
-        "Pseudocode Xrefs: removed %" FMT_Z " implementation names at slot 0x%" FMT_64 "X\n",
+        "IDA-VTable-Utility: removed %" FMT_Z " implementation names at slot 0x%" FMT_64 "X\n",
         renamed_count,
         uint64(marker->slot));
     else
       msg(
-        "Pseudocode Xrefs: renamed %" FMT_Z " implementations at slot 0x%" FMT_64 "X"
+        "IDA-VTable-Utility: renamed %" FMT_Z " implementations at slot 0x%" FMT_64 "X"
         " across %" FMT_Z " named VTABLEs\n",
         renamed_count,
         uint64(marker->slot),
@@ -2709,7 +2709,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
 
     msg(
-      "Pseudocode Xrefs: VTABLE[0x%" FMT_64 "X] is first declared by %s\n",
+      "IDA-VTable-Utility: VTABLE[0x%" FMT_64 "X] is first declared by %s\n",
       uint64(marker->slot),
       declaring_class.c_str());
     return true;
@@ -2868,7 +2868,7 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
 
     vu->cfunc->refresh_func_ctext();
     msg(
-      "Pseudocode Xrefs: applied prototype to %" FMT_Z
+      "IDA-VTable-Utility: applied prototype to %" FMT_Z
       " implementations across %" FMT_Z " named VTABLEs\n",
       applied_count,
       vtable_count);
@@ -2989,7 +2989,7 @@ ssize_t idaapi decompiler_callback(
         widget,
         popup,
         VTABLE_DECLARING_ACTION_NAME,
-        "Pseudocode Xrefs/");
+        "IDA-VTable-Utility/");
     return 0;
   }
 
@@ -3033,7 +3033,7 @@ plugmod_t *idaapi init()
     return nullptr;
   if ( !vtable_rewrite_self_test() )
   {
-    warning("Pseudocode Xrefs: internal VTABLE rewrite test failed");
+    warning("IDA-VTable-Utility: internal VTABLE rewrite test failed");
     return nullptr;
   }
   return new pseudocode_xrefs_plugmod_t;
@@ -3048,8 +3048,8 @@ plugin_t PLUGIN =
   init,
   nullptr,
   nullptr,
-  "Shows xrefs for the pseudocode item under the cursor.",
+  "Improves virtual-call display, navigation, editing, and hierarchy cross-references.",
   "",
-  "Pseudocode Xrefs",
+  "IDA-VTable-Utility",
   ""
 };

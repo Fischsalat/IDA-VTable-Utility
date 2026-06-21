@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(pseudocode_xrefs LANGUAGES CXX)
+project(IDA-VTable-Utility LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,19 +21,21 @@ ida_add_plugin(pseudocode_xrefs
 )
 
 if(WIN32 AND DEFINED ENV{APPDATA})
-  set(PSEUDOCODE_XREFS_USER_PLUGIN_DIR
+  # Keep the legacy directory so upgrades replace the existing plugin instead
+  # of loading a second copy under the new public name.
+  set(IDA_VTABLE_UTILITY_USER_PLUGIN_DIR
     "$ENV{APPDATA}/Hex-Rays/IDA Pro/plugins/pseudocode_xrefs")
 
   add_custom_command(TARGET pseudocode_xrefs POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory
-      "${PSEUDOCODE_XREFS_USER_PLUGIN_DIR}"
+      "${IDA_VTABLE_UTILITY_USER_PLUGIN_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "$<TARGET_FILE:pseudocode_xrefs>"
-      "${PSEUDOCODE_XREFS_USER_PLUGIN_DIR}/$<TARGET_FILE_NAME:pseudocode_xrefs>"
+      "${IDA_VTABLE_UTILITY_USER_PLUGIN_DIR}/$<TARGET_FILE_NAME:pseudocode_xrefs>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "${CMAKE_CURRENT_SOURCE_DIR}/ida-plugin.json"
-      "${PSEUDOCODE_XREFS_USER_PLUGIN_DIR}/ida-plugin.json"
-    COMMENT "Installing Pseudocode Xrefs in the IDA user plugin directory"
+      "${IDA_VTABLE_UTILITY_USER_PLUGIN_DIR}/ida-plugin.json"
+    COMMENT "Installing IDA-VTable-Utility in the IDA user plugin directory"
   )
 endif()
 

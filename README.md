@@ -1,161 +1,116 @@
-# Pseudocode Xrefs
+# IDA-VTable-Utility
 
-An IDA Pro C++ plugin that opens IDA's native cross-reference chooser for the
-pseudocode item under the keyboard cursor when `K` is pressed.
+IDA-VTable-Utility improves virtual-function calls in the Hex-Rays pseudocode
+view. It recognizes direct and indirect VTable access, renders readable method
+expressions, and provides inheritance-aware navigation, renaming, prototypes,
+and cross-references.
 
-The action is enabled only in Hex-Rays pseudocode views. Target resolution and
-xref display are delegated to IDA's built-in `JumpOpXref` action, so the plugin
-follows IDA's native behavior for functions, globals, strings, structure
-members, and other supported pseudocode operands.
+## Features
 
-The plugin also rewrites raw virtual-call expressions such as
-`*(*object + 0x10)(object, 0)` as
-`object->VTABLE[0x2](object, 0)` on 64-bit databases. If the object has a named
-type, its matching `TypeName_vft`/`TypeName_Vft` symbol exists, and the selected
-entry points to a named function, the token is rendered using that function's
-name instead (for example, `object->demo_method_2(...)`).
+### Virtual-call recognition
 
-Typed forms such as `(*(object->VTable + 2))(...)` are recognized as well.
+The plugin recognizes raw and typed VTable expressions such as:
+
+```cpp
+(*(*object + 0x10))(object, 0);
+(*(object->VTable + 2))(object, 0);
+```
+
+They are rendered as `object->VTABLE[0x2](object, 0)`, or as
+`object->MethodName(object, 0)` when the slot points to a named function.
+
+Split loads are tracked as well:
+
+```cpp
+v19 = *(this->VTable + 0x163);
+v19(this, ...);
+```
+
+The assignment is rendered as `v19 = &this->VTABLE[0x163]`, or
+`v19 = &this->MethodName` for a named entry. For an untyped `void *this`, the
+plugin can infer the class from the containing `Class::Method` function when a
+matching named VTable exists.
+
+VTable symbols may use the `_vft`, `_Vft`, or `_VFT` suffix.
+
+### Pseudocode actions
+
+Actions activate only when the cursor is on a recognized VTable method or
+index. IDA's normal shortcuts remain available everywhere else.
+
+| Input | Action |
+| --- | --- |
+| Double-click or `J` | Open the current class's implementation in pseudocode. |
+| `I` | Toggle the displayed slot between VTable index and byte offset. |
+| `N` | Rename or unname the slot's hierarchy implementations. |
+| `Y` | Edit the current implementation's prototype and apply it to matching hierarchy implementations. |
+| `X` | Show implementations in the current class hierarchy. |
+| `K` | Show ordinary cross-references for the resolved target. |
+
+The hierarchy window contains one row per class. Clicking a column selects its
+destination:
+
+- **Class** opens the class in Local Types.
+- **VTABLE** opens the exact VTable slot in disassembly.
+- **Implementation** opens the implementation in pseudocode.
+- **Address** opens the target address in disassembly.
+
+### Inheritance-aware edits
+
+A plain name entered with `N` treats the current static class as the declaration
+class and updates only that class and its descendants. This prevents a newly
+introduced derived-class method from writing beyond shorter base VTables.
+
+- `AActor::MyFunction` sets `AActor` as the declaration class and applies basic
+  Itanium ABI mangling to each implementation.
+- `AActor:MyFunction` uses `AActor` only as a declaration hint; the prefix is not
+  part of the saved function name.
+- An empty name removes the names across the same hierarchy boundary.
+
+You can also right-click a recognized method and choose
+**IDA-VTable-Utility → Set virtual method declaring class...**. Declaration
+boundaries are stored in the IDB.
+
+Basic Itanium nested method names are decoded for display. For example,
+`_ZN16ATICharacterBase20execSpawnPieceOfMeatEv` is shown as
+`SpawnPieceOfMeat`; an override may be qualified with its declaring class when
+needed.
+
+`Y` starts with the actual prototype from the current class's VTable target. The
+edited declaration is then applied only to implementations inside the selected
+declaration boundary.
 
 ## Requirements
 
-- IDA Pro 9.2 or newer with a Hex-Rays decompiler
-- IDA SDK 9.2 or newer
+- IDA Professional 9.2 or newer
+- Hex-Rays decompiler
+- IDA SDK configured through the `IDASDK` environment variable
 - CMake 3.27 or newer
-- A C++17 compiler (Visual Studio 2022 on Windows)
+- Visual Studio with C++ build tools on Windows
 
 ## Build
 
-Initialize the SDK's CMake submodule once:
-
 ```powershell
-git -C C:\path\to\ida-sdk submodule update --init --recursive
-```
-
-Configure and build:
-
-```powershell
-$env:IDASDK = "C:\path\to\ida-sdk"
+$env:IDASDK = "C:\path\to\idasdk"
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-The SDK build helpers place the resulting plugin under the configured
-`IDABIN\plugins` directory. On Windows, this project also copies each successful
-plugin build to
-`%APPDATA%\Hex-Rays\IDA Pro\plugins\pseudocode_xrefs`, so a newly started IDA
-session loads the current build automatically.
+On Windows, the build installs the DLL and metadata into IDA's user plugin
+directory automatically. The internal DLL name, action IDs, metadata keys, and
+install folder remain `pseudocode_xrefs` for upgrade compatibility.
 
-## Demo Database
+## Demo and diagnostics
 
-The repository includes:
+The `demo` directory contains small databases and sources covering direct calls,
+indirect loads, inheritance, navigation, rename, and prototype propagation.
+Supporting IDAPython checks are in `tools`.
 
-- `demo/pseudocode_xrefs_demo.exe`, a small program with clear function and
-  global-data cross-references.
-- `demo/pseudocode_xrefs_demo.i64`, its pre-analyzed IDA database.
-- `demo/pseudocode_xrefs_vtable_demo.i64`, the latest database with a raw
-  virtual-call example in `invoke_raw_vtable_slot_2`.
-- `demo/pseudocode_xrefs_vtable_jump_demo.i64`, a typed-object database for
-  testing `J` navigation through `VftJumpType_vft`.
-- `demo/pseudocode_xrefs_complex_args_demo.i64`, a typed-object database whose
-  raw virtual call passes both `&g_vtable_addend` and the `scale_value` function
-  pointer.
-- `demo/pseudocode_xrefs_inheritance_demo.i64`, an inheritance database with
-  `UObject`, `AActor`, `ASomeActor`, and `USomeNetClass`, each with a named VTABLE.
+Diagnostic output is written to:
 
-Open the `.i64` file, decompile `main`, place the cursor on a function or global
-item, and press `K`.
-
-For the VTABLE rewrite, open `pseudocode_xrefs_vtable_demo.i64` and decompile
-`invoke_raw_vtable_slot_2`.
-
-For VTABLE navigation, open `pseudocode_xrefs_vtable_jump_demo.i64`, decompile
-`anonymous_namespace_::invoke_raw_vtable_slot_2`, place the cursor on
-`VTABLE[0x2]`, and press `J` or double-click the token. The plugin should jump
-to `demo_method_2`.
-
-For operand hit-testing, open `pseudocode_xrefs_complex_args_demo.i64` and
-decompile `invoke_raw_vtable_slot_2`. The call is rendered as:
-
-```cpp
-return object->demo_method_2(object, &g_vtable_addend, scale_value);
+```text
+%APPDATA%\Hex-Rays\IDA Pro\pseudocode_xrefs.log
 ```
 
-Only double-clicking `demo_method_2` should jump to its implementation.
-Double-clicking `object`, `g_vtable_addend`, or `scale_value` is left to IDA's
-native navigation.
-
-With named-method rendering enabled, place the cursor on the method name and:
-
-- Press `I` to show its VTABLE index and original byte offset.
-- Press `J` or double-click to jump to the implementation.
-- Press `N` to rename the function stored in that VTABLE slot.
-- Press `Y` to edit a function prototype in place and apply it to every
-  implementation inside the current declaration boundary. On non-VTABLE items,
-  native `Y` behavior is preserved.
-- Press `K` for the existing pseudocode xref action.
-- Press `X` on a resolved virtual-method token to list the declaration class
-  and its derived VTABLE implementations at that slot. Each class occupies one
-  row. Activating the Class cell opens Local
-  Types, VTABLE jumps to the exact slot, Implementation opens pseudocode, and
-  Address opens the target in disassembly.
-- Right-click a resolved virtual method and choose **Pseudocode Xrefs → Set
-  virtual method declaring class...** to record the first class that declares
-  that slot. `X` and hierarchy `N` renaming then include that class and its
-  descendants only. The boundary is stored in the IDB.
-  `X` on all other pseudocode items remains IDA's native xref action.
-
-### Inheritance-aware rename
-
-When `N` is used with a plain name, the current static class is treated as the
-declaration class and only it and its descendants are renamed. Prefix the input
-with an ancestor and `::` (for example `AActor::Tick`) to declare the method at
-that ancestor and propagate through all of that ancestor's descendants. No
-ancestor is inspected unless explicitly selected this way. Distinct
-implementations receive class-qualified names,
-for example `AActor_Tick` and `ASomeActor_Tick`; shared implementations are
-renamed only once. Classes without a matching named VTABLE are skipped.
-Submitting an empty name removes the function names over the same boundary.
-
-Basic Itanium nested method names are supported. Symbols such as
-`_ZN16ATICharacterBase20execSpawnPieceOfMeatEv` render as
-`SpawnPieceOfMeat`; an actual override is qualified with its implementation
-class. Entering `ATICharacterBase::SpawnPieceOfMeat` auto-mangles the names for
-each implementation class. A single-colon prefix such as
-`ATICharacterBase:SpawnPieceOfMeat` sets only the declaration boundary and is
-discarded from the actual name.
-
-Navigation remains exact to the object's static type. An `AActor *` call always
-uses `AActor_Vft[index]` for `J` and double-click, even when ancestors,
-descendants, or sibling classes override the same slot.
-
-If the object is typed as `SomeType *` and a symbol named `SomeType_vft`
-exists, placing the cursor on `object->VTABLE[index]` and pressing `J`, or
-double-clicking that token, reads the vtable entry and jumps to the referenced
-function.
-
-Split indirect calls are also recognized. Assignments such as
-`v19 = *(this->VTable + 0x163)` and `v19 = *(*this + 0xB18LL)` attach slot
-metadata to `v19`; later `v19(...)` calls support the same display, navigation,
-index, xref, and rename actions. For `void *this`, the class is inferred from a
-containing `Class::Method` when `Class_Vft` exists.
-The assignment is rendered as `v19 = &this->VTABLE[index]`, or as
-`v19 = &this->FunctionName` when the slot target is named.
-
-Diagnostic information for `J` navigation is appended to
-`%APPDATA%\Hex-Rays\IDA Pro\pseudocode_xrefs.log`.
-
-## Interaction test
-
-`tools/check_input_events.py` drives IDA's actual pseudocode widget. It sends a
-Qt `J` key event and Windows double-clicks on `demo_method_2`, `object`,
-`g_vtable_addend`, and `scale_value`. It verifies that the key and method click
-navigate to `demo_method_2`, while the operand clicks do not trigger VTABLE
-navigation. Run it with the GUI executable because mouse events are unavailable
-in `idat.exe` batch mode:
-
-```powershell
-& "C:\Program Files\IDA Professional 9.2\ida.exe" -A `
-  "-SC:\path\to\IDAClickAndVFT\tools\check_input_events.py" `
-  "C:\path\to\IDAClickAndVFT\demo\pseudocode_xrefs_complex_args_demo.i64"
-```
+The legacy log filename is retained so existing troubleshooting scripts keep
+working.
