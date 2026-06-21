@@ -5,6 +5,8 @@ view. It recognizes direct and indirect VTable access, renders readable method
 expressions, and provides inheritance-aware navigation, renaming, prototypes,
 and cross-references.
 
+### NOTE: This project is fully AI generated, I don't take any credit for anything in here.
+
 ## Features
 
 ### Virtual-call recognition
