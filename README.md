@@ -90,6 +90,9 @@ With named-method rendering enabled, place the cursor on the method name and:
 - Press `I` to show its VTABLE index and original byte offset.
 - Press `J` or double-click to jump to the implementation.
 - Press `N` to rename the function stored in that VTABLE slot.
+- Press `Y` to edit a function prototype in place and apply it to every
+  implementation inside the current declaration boundary. On non-VTABLE items,
+  native `Y` behavior is preserved.
 - Press `K` for the existing pseudocode xref action.
 - Press `X` on a resolved virtual-method token to list the declaration class
   and its derived VTABLE implementations at that slot. Each class occupies one
@@ -113,6 +116,14 @@ implementations receive class-qualified names,
 for example `AActor_Tick` and `ASomeActor_Tick`; shared implementations are
 renamed only once. Classes without a matching named VTABLE are skipped.
 Submitting an empty name removes the function names over the same boundary.
+
+Basic Itanium nested method names are supported. Symbols such as
+`_ZN16ATICharacterBase20execSpawnPieceOfMeatEv` render as
+`SpawnPieceOfMeat`; an actual override is qualified with its implementation
+class. Entering `ATICharacterBase::SpawnPieceOfMeat` auto-mangles the names for
+each implementation class. A single-colon prefix such as
+`ATICharacterBase:SpawnPieceOfMeat` sets only the declaration boundary and is
+discarded from the actual name.
 
 Navigation remains exact to the object's static type. An `AActor *` call always
 uses `AActor_Vft[index]` for `J` and double-click, even when ancestors,

@@ -101,6 +101,22 @@ def run():
             and renamed["scale_value"] == "scale_value"
         )
         x_ok = classes == {"AActor", "ASomeActor"}
+    elif rename_request == "AActor:HintedMethod":
+        rename_ok = (
+            renamed["demo_method_0"] == "demo_method_0"
+            and renamed["demo_method_1"] == "AActor_HintedMethod"
+            and renamed["demo_method_2"] == "ASomeActor_HintedMethod"
+            and renamed["scale_value"] == "scale_value"
+        )
+        x_ok = classes == {"AActor", "ASomeActor"}
+    elif rename_request == "AActor::SpawnPieceOfMeat":
+        rename_ok = (
+            renamed["demo_method_0"] == "demo_method_0"
+            and renamed["demo_method_1"] == "_ZN6AActor16SpawnPieceOfMeatEv"
+            and renamed["demo_method_2"] == "_ZN10ASomeActor16SpawnPieceOfMeatEv"
+            and renamed["scale_value"] == "scale_value"
+        )
+        x_ok = classes == {"AActor", "ASomeActor"}
     elif rename_request.startswith("UObject::"):
         rename_ok = (
             renamed["demo_method_0"] == "UObject_BaseDeclared"

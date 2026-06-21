@@ -3,6 +3,7 @@
 #include <diskio.hpp>
 #include <fpro.h>
 #include <netnode.hpp>
+#include <nalt.hpp>
 
 #include <cctype>
 #include <algorithm>
@@ -31,6 +32,8 @@ constexpr char VTABLE_XREF_ACTION_NAME[] = "pseudocode_xrefs:show_hierarchy_vers
 constexpr char VTABLE_XREF_ACTION_LABEL[] = "Show hierarchy implementations";
 constexpr char VTABLE_DECLARING_ACTION_NAME[] = "pseudocode_xrefs:set_declaring_class";
 constexpr char VTABLE_DECLARING_ACTION_LABEL[] = "Set virtual method declaring class...";
+constexpr char VTABLE_TYPE_ACTION_NAME[] = "pseudocode_xrefs:edit_vtable_function_type";
+constexpr char VTABLE_TYPE_ACTION_LABEL[] = "Edit VTABLE function signature";
 constexpr char DECLARATIONS_NODE_NAME[] = "$ pseudocode_xrefs declarations";
 
 struct vtable_marker_t
@@ -49,7 +52,87 @@ struct vtable_marker_t
 
 using vtable_markers_t = qvector<vtable_marker_t>;
 
+bool is_identifier_start(char c);
 bool is_identifier_char(char c);
+bool is_vtable_override(
+      const qstring &selected_class,
+      uval_t slot,
+      ea_t target);
+bool get_declaring_class(
+      const qstring &selected_class,
+      uval_t slot,
+      qstring *declaring_class);
+
+struct itanium_method_t
+{
+  qstring class_name;
+  qstring method_name;
+};
+
+bool parse_itanium_method(const qstring &symbol, itanium_method_t *method)
+{
+  const std::string name(symbol.c_str());
+  if ( name.rfind("_ZN", 0) != 0 )
+    return false;
+  size_t cursor = 3;
+  qvector<qstring> components;
+  while ( cursor < name.size() && name[cursor] != 'E' )
+  {
+    if ( std::isdigit(uchar(name[cursor])) == 0 )
+      return false;
+    size_t length = 0;
+    while ( cursor < name.size() && std::isdigit(uchar(name[cursor])) != 0 )
+      length = length * 10 + size_t(name[cursor++] - '0');
+    if ( length == 0 || cursor + length > name.size() )
+      return false;
+    components.push_back(name.substr(cursor, length).c_str());
+    cursor += length;
+  }
+  if ( cursor >= name.size() || name[cursor] != 'E' || components.size() < 2 )
+    return false;
+
+  method->method_name = components.back();
+  method->class_name.clear();
+  for ( size_t index = 0; index + 1 < components.size(); ++index )
+  {
+    if ( !method->class_name.empty() )
+      method->class_name.append("::");
+    method->class_name.append(components[index]);
+  }
+  return true;
+}
+
+bool mangle_itanium_method(const qstring &scoped_name, qstring *mangled)
+{
+  const std::string input(scoped_name.c_str());
+  qvector<std::string> components;
+  size_t start = 0;
+  while ( start < input.size() )
+  {
+    const size_t separator = input.find("::", start);
+    const size_t end = separator == std::string::npos ? input.size() : separator;
+    if ( end == start )
+      return false;
+    const std::string component = input.substr(start, end - start);
+    if ( !is_identifier_start(component[0]) )
+      return false;
+    for ( char c : component )
+      if ( !is_identifier_char(c) )
+        return false;
+    components.push_back(component);
+    if ( separator == std::string::npos )
+      break;
+    start = separator + 2;
+  }
+  if ( components.size() < 2 )
+    return false;
+
+  *mangled = "_ZN";
+  for ( const std::string &component : components )
+    mangled->cat_sprnt("%" FMT_Z "%s", component.length(), component.c_str());
+  mangled->append("Ev");
+  return true;
+}
 
 bool find_class_vtable(
       const qstring &class_name,
@@ -152,6 +235,67 @@ bool get_vtable_entry_target(
   return *target != BADADDR && is_mapped(*target);
 }
 
+bool extract_function_type(tinfo_t type, tinfo_t *function_type)
+{
+  for ( int depth = 0; depth < 4; ++depth )
+  {
+    if ( type.is_func() )
+    {
+      *function_type = type;
+      return true;
+    }
+    if ( !type.is_ptr_or_array() )
+      break;
+    type = type.get_ptrarr_object();
+  }
+  return false;
+}
+
+bool is_placeholder_function_type(const tinfo_t &type)
+{
+  func_type_data_t details;
+  return type.get_func_details(&details, GTD_NO_ARGLOCS)
+      && details.empty()
+      && details.rettype.is_char();
+}
+
+bool get_vtable_slot_function_type(
+      ea_t vtable_ea,
+      uval_t slot,
+      tinfo_t *function_type)
+{
+  const size_t pointer_size = inf_is_64bit() ? 8 : 4;
+  const ea_t entry_ea = vtable_ea + slot * pointer_size;
+  tinfo_t entry_type;
+  if ( get_tinfo(&entry_type, entry_ea)
+    && extract_function_type(entry_type, function_type) )
+  {
+    return true;
+  }
+
+  tinfo_t vtable_type;
+  if ( !get_tinfo(&vtable_type, vtable_ea) )
+    return false;
+  if ( vtable_type.is_array() )
+    return extract_function_type(vtable_type.get_ptrarr_object(), function_type);
+  if ( vtable_type.is_udt() )
+  {
+    udt_type_data_t members;
+    if ( !vtable_type.get_udt_details(&members) )
+      return false;
+    const uint64 bit_offset = uint64(slot * pointer_size * 8);
+    for ( const udm_t &member : members )
+    {
+      if ( member.offset == bit_offset
+        && extract_function_type(member.type, function_type) )
+      {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool get_named_vtable_entry(
       cfunc_t *cfunc,
       vtable_marker_t *marker)
@@ -160,11 +304,34 @@ bool get_named_vtable_entry(
   if ( !get_vtable_entry_target(cfunc, *marker, &target) )
     return false;
 
-  qstring short_name = get_short_name(target);
-  std::string display(short_name.c_str());
-  const size_t namespace_separator = display.rfind("::");
-  if ( namespace_separator != std::string::npos )
-    display.erase(0, namespace_separator + 2);
+  qstring selected_class, vtable_name;
+  ea_t vtable_ea = BADADDR;
+  find_marker_vtable(
+    cfunc, *marker, &selected_class, &vtable_name, &vtable_ea);
+
+  std::string display;
+  itanium_method_t itanium;
+  const qstring raw_name = get_name(target);
+  if ( parse_itanium_method(raw_name, &itanium) )
+  {
+    display = itanium.method_name.c_str();
+    if ( display.rfind("exec", 0) == 0
+      && display.length() > 4
+      && std::isupper(uchar(display[4])) != 0 )
+    {
+      display.erase(0, 4);
+    }
+    if ( is_vtable_override(selected_class, marker->slot, target) )
+      display = std::string(itanium.class_name.c_str()) + "::" + display;
+  }
+  else
+  {
+    qstring short_name = get_short_name(target);
+    display = short_name.c_str();
+    const size_t namespace_separator = display.rfind("::");
+    if ( namespace_separator != std::string::npos )
+      display.erase(0, namespace_separator + 2);
+  }
   if ( display.empty() || display.rfind("sub_", 0) == 0 )
     return false;
 
@@ -344,6 +511,51 @@ ea_t get_class_vtable_entry(const qstring &class_name, uval_t slot)
   const size_t pointer_size = inf_is_64bit() ? 8 : 4;
   const ea_t entry_ea = vtable_ea + slot * pointer_size;
   return is_loaded(entry_ea) ? entry_ea : BADADDR;
+}
+
+bool is_vtable_override(
+      const qstring &selected_class,
+      uval_t slot,
+      ea_t target)
+{
+  qstring declaring_class;
+  if ( get_declaring_class(selected_class, slot, &declaring_class) )
+  {
+    if ( declaring_class == selected_class )
+      return false;
+    const ea_t declaring_entry = get_class_vtable_entry(declaring_class, slot);
+    if ( declaring_entry == BADADDR )
+      return false;
+    const size_t pointer_size = inf_is_64bit() ? 8 : 4;
+    const ea_t declaring_target = pointer_size == 8
+      ? ea_t(get_qword(declaring_entry))
+      : ea_t(get_dword(declaring_entry));
+    return declaring_target != BADADDR
+        && is_mapped(declaring_target)
+        && declaring_target != target;
+  }
+
+  qvector<qstring> ancestors;
+  collect_ancestor_hierarchy(selected_class, &ancestors);
+  const size_t pointer_size = inf_is_64bit() ? 8 : 4;
+  for ( const qstring &ancestor : ancestors )
+  {
+    if ( ancestor == selected_class )
+      continue;
+    const ea_t entry_ea = get_class_vtable_entry(ancestor, slot);
+    if ( entry_ea == BADADDR )
+      continue;
+    const ea_t ancestor_target = pointer_size == 8
+      ? ea_t(get_qword(entry_ea))
+      : ea_t(get_dword(entry_ea));
+    if ( ancestor_target != BADADDR
+      && is_mapped(ancestor_target)
+      && ancestor_target != target )
+    {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool get_declaring_class(
@@ -1346,13 +1558,24 @@ bool vtable_rewrite_self_test()
     && raw_binding.variable == "v19"
     && raw_binding.object_name == "this"
     && raw_binding.byte_offset == 0xB18;
+  itanium_method_t parsed_itanium;
+  qstring remangled;
+  const bool itanium_ok = parse_itanium_method(
+        "_ZN16ATICharacterBase20execSpawnPieceOfMeatEv",
+        &parsed_itanium)
+    && parsed_itanium.class_name == "ATICharacterBase"
+    && parsed_itanium.method_name == "execSpawnPieceOfMeat"
+    && mangle_itanium_method(
+      "ATICharacterBase::SpawnPieceOfMeat", &remangled)
+    && remangled == "_ZN16ATICharacterBase16SpawnPieceOfMeatEv";
 
   return raw.find(colored_object) != std::string::npos
       && raw.find(colored_name) != std::string::npos
       && raw.find(colored_number) != std::string::npos
       && markers[0].byte_offset == 0x10
       && markers[0].slot == 2
-      && indirect_patterns_ok;
+      && indirect_patterns_ok
+      && itanium_ok;
 }
 
 struct xref_entry_t
@@ -1773,18 +1996,18 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
 
     int idaapi activate(action_activation_ctx_t *ctx) override
     {
-      if ( ctx != nullptr
-        && ctx->widget_type == BWN_PSEUDOCODE
-        && plugin->show_hierarchy_versions(get_widget_vdui(ctx->widget)) )
-      {
+      if ( ctx == nullptr || ctx->widget_type != BWN_PSEUDOCODE )
+        return 0;
+      if ( plugin->show_hierarchy_versions(get_widget_vdui(ctx->widget)) )
         return 1;
-      }
       return process_ui_action("hx:JmpXref") ? 1 : 0;
     }
 
     action_state_t idaapi update(action_update_ctx_t *ctx) override
     {
-      return ctx != nullptr ? AST_ENABLE_FOR_WIDGET : AST_DISABLE_FOR_WIDGET;
+      return ctx != nullptr && ctx->widget_type == BWN_PSEUDOCODE
+           ? AST_ENABLE_FOR_WIDGET
+           : AST_DISABLE_FOR_WIDGET;
     }
   };
 
@@ -1812,6 +2035,35 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     }
   };
 
+  struct edit_vtable_type_action_t final : action_handler_t
+  {
+    pseudocode_xrefs_plugmod_t *plugin;
+
+    explicit edit_vtable_type_action_t(pseudocode_xrefs_plugmod_t *plugin_)
+      : plugin(plugin_)
+    {
+    }
+
+    int idaapi activate(action_activation_ctx_t *ctx) override
+    {
+      if ( ctx != nullptr
+        && ctx->widget_type == BWN_PSEUDOCODE
+        && plugin->edit_vtable_function_type(get_widget_vdui(ctx->widget)) )
+      {
+        return 1;
+      }
+      const char *fallback = ctx != nullptr && ctx->widget_type == BWN_PSEUDOCODE
+                           ? "hx:SetType"
+                           : "SetType";
+      return process_ui_action(fallback) ? 1 : 0;
+    }
+
+    action_state_t idaapi update(action_update_ctx_t *ctx) override
+    {
+      return ctx != nullptr ? AST_ENABLE_FOR_WIDGET : AST_DISABLE_FOR_WIDGET;
+    }
+  };
+
   qmap<ea_t, vtable_markers_t> vtable_markers;
   ui_listener_t ui_listener;
   view_listener_t view_listener;
@@ -1820,7 +2072,10 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
   rename_vtable_target_action_t rename_vtable_target_action;
   hierarchy_xrefs_action_t hierarchy_xrefs_action;
   set_declaring_class_action_t set_declaring_class_action;
+  edit_vtable_type_action_t edit_vtable_type_action;
   qstring native_xref_shortcut;
+  qstring native_hexrays_type_shortcut;
+  qstring native_disasm_type_shortcut;
 
   pseudocode_xrefs_plugmod_t()
     : ui_listener(this),
@@ -1829,7 +2084,8 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       show_vtable_index_action(this),
       rename_vtable_target_action(this),
       hierarchy_xrefs_action(this),
-      set_declaring_class_action(this)
+      set_declaring_class_action(this),
+      edit_vtable_type_action(this)
   {
     const action_desc_t xref_desc = ACTION_DESC_LITERAL_PLUGMOD(
       ACTION_NAME,
@@ -1914,19 +2170,44 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     if ( !register_action(declaring_desc) )
       msg("%s: failed to register action %s\n", PLUGIN.wanted_name, VTABLE_DECLARING_ACTION_NAME);
 
+    get_action_shortcut(&native_hexrays_type_shortcut, "hx:SetType");
+    get_action_shortcut(&native_disasm_type_shortcut, "SetType");
+    update_action_shortcut("hx:SetType", nullptr);
+    update_action_shortcut("SetType", nullptr);
+    const action_desc_t type_desc = ACTION_DESC_LITERAL_PLUGMOD(
+      VTABLE_TYPE_ACTION_NAME,
+      VTABLE_TYPE_ACTION_LABEL,
+      &edit_vtable_type_action,
+      this,
+      "Y",
+      "Apply a function signature across this VTABLE declaration hierarchy; otherwise use native Set type",
+      -1);
+    if ( !register_action(type_desc) )
+    {
+      msg("%s: failed to register action %s\n", PLUGIN.wanted_name, VTABLE_TYPE_ACTION_NAME);
+      update_action_shortcut("hx:SetType", native_hexrays_type_shortcut.c_str());
+      update_action_shortcut("SetType", native_disasm_type_shortcut.c_str());
+      native_hexrays_type_shortcut.clear();
+      native_disasm_type_shortcut.clear();
+    }
+
     if ( !install_hexrays_callback(decompiler_callback, this) )
       msg("%s: failed to install the pseudocode keyboard callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_VIEW, &view_listener) )
       msg("%s: failed to install the pseudocode mouse callback\n", PLUGIN.wanted_name);
     if ( !hook_event_listener(HT_UI, &ui_listener) )
       msg("%s: failed to install the pseudocode rename callback\n", PLUGIN.wanted_name);
-    debug_log("plugin initialized: version=1.8.2");
+    debug_log("plugin initialized: version=1.10.5");
   }
 
   ~pseudocode_xrefs_plugmod_t() override
   {
     if ( !native_xref_shortcut.empty() )
       update_action_shortcut("hx:JmpXref", native_xref_shortcut.c_str());
+    if ( !native_hexrays_type_shortcut.empty() )
+      update_action_shortcut("hx:SetType", native_hexrays_type_shortcut.c_str());
+    if ( !native_disasm_type_shortcut.empty() )
+      update_action_shortcut("SetType", native_disasm_type_shortcut.c_str());
     remove_hexrays_callback(decompiler_callback, this);
   }
 
@@ -2145,20 +2426,31 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       return true;
     }
 
-    qstring new_name = get_short_name(selected_target);
-    std::string display(new_name.c_str());
-    const size_t namespace_separator = display.rfind("::");
-    if ( namespace_separator != std::string::npos )
-      display.erase(0, namespace_separator + 2);
-    const std::string selected_prefix =
-      std::string(identifier_from_type_name(selected_class).c_str()) + "_";
-    if ( display.rfind(selected_prefix, 0) == 0 )
-      display.erase(0, selected_prefix.length());
-    new_name = display.c_str();
+    qstring new_name;
+    itanium_method_t existing_itanium;
+    if ( parse_itanium_method(get_name(selected_target), &existing_itanium) )
+    {
+      new_name = existing_itanium.class_name;
+      new_name.append("::");
+      new_name.append(existing_itanium.method_name);
+    }
+    else
+    {
+      new_name = get_short_name(selected_target);
+      std::string display(new_name.c_str());
+      const size_t namespace_separator = display.rfind("::");
+      if ( namespace_separator != std::string::npos )
+        display.erase(0, namespace_separator + 2);
+      const std::string selected_prefix =
+        std::string(identifier_from_type_name(selected_class).c_str()) + "_";
+      if ( display.rfind(selected_prefix, 0) == 0 )
+        display.erase(0, selected_prefix.length());
+      new_name = display.c_str();
+    }
     if ( !ask_str(
           &new_name,
           HIST_IDENT,
-          "Rename VTABLE[0x%" FMT_64 "X]. Prefix with AncestorClass:: to set its declaration boundary.",
+          "Rename VTABLE[0x%" FMT_64 "X]. Use Class::Method for Itanium mangling or Class: as a declaration-only hint.",
           uint64(marker->slot)) )
     {
       return true;
@@ -2168,24 +2460,43 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
     qstring method_name = new_name;
     qvector<qstring> ancestors;
     collect_ancestor_hierarchy(selected_class, &ancestors);
-    size_t matched_prefix_length = 0;
+    size_t declaration_hint_length = 0;
+    for ( const qstring &ancestor : ancestors )
+    {
+      qstring hint = ancestor;
+      hint.append(':');
+      if ( new_name.length() >= hint.length()
+        && strncmp(new_name.c_str(), hint.c_str(), hint.length()) == 0
+        && (new_name.length() == hint.length()
+          || new_name[hint.length()] != ':')
+        && hint.length() > declaration_hint_length )
+      {
+        declaring_class = ancestor;
+        method_name = new_name.substr(hint.length());
+        declaration_hint_length = hint.length();
+      }
+    }
+
+    size_t scoped_declaration_length = 0;
     for ( const qstring &ancestor : ancestors )
     {
       qstring prefix = ancestor;
       prefix.append("::");
-      if ( new_name.length() > prefix.length()
-        && strncmp(new_name.c_str(), prefix.c_str(), prefix.length()) == 0
-        && prefix.length() > matched_prefix_length )
+      if ( declaration_hint_length == 0
+        && method_name.length() > prefix.length()
+        && strncmp(method_name.c_str(), prefix.c_str(), prefix.length()) == 0
+        && prefix.length() > scoped_declaration_length )
       {
         declaring_class = ancestor;
-        method_name = new_name.substr(prefix.length());
-        matched_prefix_length = prefix.length();
+        scoped_declaration_length = prefix.length();
       }
     }
-    if ( matched_prefix_length == 0 && strstr(new_name.c_str(), "::") != nullptr )
+
+    const bool scoped_name = strstr(method_name.c_str(), "::") != nullptr;
+    qstring mangled_probe;
+    if ( scoped_name && !mangle_itanium_method(method_name, &mangled_probe) )
     {
-      warning(
-        "The rename prefix must be the current class or one of its ancestors");
+      warning("Only basic Class::Method scoped names can be Itanium-mangled");
       return true;
     }
     if ( !set_declaring_class_metadata(
@@ -2235,7 +2546,16 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
         continue;
       }
       qstring applied_name;
-      if ( targets.size() == 1 )
+      if ( scoped_name )
+      {
+        const char *last_separator = strrchr(method_name.c_str(), ':');
+        qstring scoped_target = entry.class_name;
+        scoped_target.append("::");
+        scoped_target.append(last_separator != nullptr ? last_separator + 1 : method_name.c_str());
+        if ( !mangle_itanium_method(scoped_target, &applied_name) )
+          continue;
+      }
+      else if ( targets.size() == 1 )
       {
         applied_name = new_name;
       }
@@ -2392,6 +2712,166 @@ struct pseudocode_xrefs_plugmod_t final : plugmod_t
       "Pseudocode Xrefs: VTABLE[0x%" FMT_64 "X] is first declared by %s\n",
       uint64(marker->slot),
       declaring_class.c_str());
+    return true;
+  }
+
+  bool edit_vtable_function_type(vdui_t *vu)
+  {
+    vtable_marker_t fallback;
+    const vtable_marker_t *marker = find_vtable_marker(vu, USE_KEYBOARD, &fallback);
+    if ( marker == nullptr )
+      return false;
+
+    ea_t target = marker->target;
+    if ( target == BADADDR
+      && !get_vtable_entry_target(vu->cfunc, *marker, &target) )
+    {
+      warning(
+        "VTABLE[0x%" FMT_64 "X] does not contain a mapped function",
+        uint64(marker->slot));
+      return true;
+    }
+    func_t *target_function = get_func(target);
+    if ( target_function == nullptr )
+    {
+      warning("The VTABLE target at %a is not defined as a function", target);
+      return true;
+    }
+
+    qstring selected_class, vtable_name;
+    ea_t vtable_ea = BADADDR;
+    if ( !find_marker_vtable(
+          vu->cfunc, *marker, &selected_class, &vtable_name, &vtable_ea) )
+    {
+      warning("Could not resolve the class hierarchy for this VTABLE slot");
+      return true;
+    }
+
+    tinfo_t current_type;
+    bool have_current_type = false;
+    if ( is_userti(target) )
+    {
+      have_current_type = get_tinfo(&current_type, target);
+      if ( have_current_type )
+        debug_log("Y default type source: user target type at %a", target);
+    }
+    if ( !have_current_type )
+    {
+      have_current_type = get_vtable_slot_function_type(
+        vtable_ea, marker->slot, &current_type);
+      if ( have_current_type && is_placeholder_function_type(current_type) )
+        have_current_type = false;
+      if ( have_current_type )
+        debug_log("Y default type source: VTABLE slot %s[0x%" FMT_64 "X]", vtable_name.c_str(), uint64(marker->slot));
+    }
+    if ( !have_current_type )
+    {
+      tinfo_t target_type;
+      if ( get_tinfo(&target_type, target)
+        && extract_function_type(target_type, &current_type)
+        && !is_placeholder_function_type(current_type) )
+      {
+        have_current_type = true;
+        debug_log("Y default type source: target type at %a", target);
+      }
+    }
+    if ( !have_current_type )
+    {
+      cfuncptr_t implementation = decompile_func(target_function);
+      if ( implementation != nullptr )
+        have_current_type = implementation->get_func_type(&current_type);
+      if ( have_current_type && is_placeholder_function_type(current_type) )
+        have_current_type = false;
+      if ( have_current_type )
+        debug_log("Y default type source: Hex-Rays implementation at %a", target);
+    }
+    if ( !have_current_type )
+    {
+      tinfo_t fallback_type;
+      have_current_type = get_tinfo(&fallback_type, target)
+                       && extract_function_type(fallback_type, &current_type);
+      if ( !have_current_type )
+        have_current_type = guess_tinfo(&current_type, target) > 0;
+    }
+
+    qstring prototype_name = marker->display_name;
+    if ( prototype_name.empty() )
+      prototype_name = get_short_name(target);
+    const char *parameters = strchr(prototype_name.c_str(), '(');
+    if ( parameters != nullptr )
+      prototype_name.resize(parameters - prototype_name.c_str());
+    const char *scope = strrchr(prototype_name.c_str(), ':');
+    if ( scope != nullptr )
+      prototype_name = scope + 1;
+    if ( prototype_name.empty() )
+      prototype_name = "method";
+    qstring declaration;
+    if ( !have_current_type
+      || !current_type.is_func()
+      || !current_type.print(&declaration, prototype_name.c_str(), PRTYPE_1LINE) )
+    {
+      warning("Could not determine the current function prototype at %a", target);
+      return true;
+    }
+    if ( !ask_str(
+          &declaration,
+          HIST_TYPE,
+          "Set VTABLE[0x%" FMT_64 "X] prototype for %s and descendants",
+          uint64(marker->slot),
+          selected_class.c_str()) )
+    {
+      return true;
+    }
+
+    tinfo_t edited_type;
+    qstring parsed_name;
+    qstring parsed_declaration = declaration;
+    parsed_declaration.trim2();
+    if ( parsed_declaration.empty()
+      || parsed_declaration[parsed_declaration.length() - 1] != ';' )
+    {
+      parsed_declaration.append(';');
+    }
+    if ( !parse_decl(
+          &edited_type,
+          &parsed_name,
+          nullptr,
+          parsed_declaration.c_str(),
+          PT_SIL | PT_RELAXED) )
+    {
+      warning("The entered declaration is not a valid function prototype");
+      return true;
+    }
+    tinfo_t normalized_function_type;
+    if ( !extract_function_type(edited_type, &normalized_function_type) )
+    {
+      warning("The entered declaration is not a function or function-pointer prototype");
+      return true;
+    }
+    edited_type = normalized_function_type;
+
+    hierarchy_targets_t targets;
+    size_t vtable_count = 0;
+    collect_hierarchy_targets(
+      selected_class, marker->slot, &targets, &vtable_count);
+    size_t applied_count = 0;
+    for ( const hierarchy_target_t &entry : targets )
+    {
+      if ( apply_tinfo(entry.target, edited_type, TINFO_DEFINITE) )
+        ++applied_count;
+    }
+    if ( applied_count == 0 )
+    {
+      warning("Could not apply the prototype to any hierarchy implementation");
+      return true;
+    }
+
+    vu->cfunc->refresh_func_ctext();
+    msg(
+      "Pseudocode Xrefs: applied prototype to %" FMT_Z
+      " implementations across %" FMT_Z " named VTABLEs\n",
+      applied_count,
+      vtable_count);
     return true;
   }
 

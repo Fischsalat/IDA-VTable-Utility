@@ -1,0 +1,74 @@
+LumFix: can't find hexrays.crt file in your IDA folder!
+LumFix: plugin init_hook failed!
+[IDA RPC 9.0] Could not read config from C:\Users\savek\AppData\Roaming\Hex-Rays\IDA Pro\ida-rpc.save
+[IDA RPC 9.2] v9.00 by shigureJ & FightingSquirrel loaded.
+
+  bytes   pages size description
+--------- ----- ---- --------------------------------------------
+   843776   103 8192 allocating memory for b-tree...
+   573440    70 8192 allocating memory for virtual array...
+   262144    32 8192 allocating memory for name pointers...
+-----------------------------------------------------------------
+  1679360            total memory allocated
+
+Loading processor module C:\Program Files\IDA Professional 9.2\procs\pc.dll for metapc...OK
+Loading type libraries...
+Autoanalysis subsystem has been initialized.
+Fusion for IDA 9.2 by FightingSquirrel loaded.
+Database for file 'pseudocode_xrefs_demo.exe' has been loaded.
+Hex-Rays Decompiler plugin has been loaded (v9.2.0.250908)
+  The hotkeys are F5: decompile, Ctrl-F5: decompile all.
+
+  Please check the Edit/Plugins menu for more information.
+[ChunkCodePatcher] Plugin loaded. Hotkey: Ctrl-Shift-C
+LumFix: can't find hexrays.crt file in your IDA folder!
+LumFix: plugin init_hook failed!
+Hex-rays version 9.2.0.250908 has been detected, gooMBA plugin ready to use
+IDAExecFunctions64: Plugin loaded.
+VTable Renderer: Hex-Rays 9.2.0.250908 detected; renderer enabled
+140001090: restored microcode from idb
+140001090: restored pseudocode from idb
+-----------------------------------------------------------------------------------------
+Python 3.10.5 (tags/v3.10.5:f377153, Jun  6 2022, 16:14:13) [MSC v.1929 64 bit (AMD64)] 
+IDAPython 64-bit v9.2.0 (c) The IDAPython Team <idapython@googlegroups.com>
+-----------------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:/Users/savek/Documents/IDAClickAndVFT/tools/check_y_signature.py", line 57, in run
+    type_ok = ida_typeinf.get_tinfo(tif, 0x140001020)
+AttributeError: module 'ida_typeinf' has no attribute 'get_tinfo'
+Unloading IDP module C:\Program Files\IDA Professional 9.2\procs\pc.dll...LumFix: can't find hexrays.crt file in your IDA folder!
+LumFix: plugin init_hook failed!
+[IDA RPC 9.0] Could not read config from C:\Users\savek\AppData\Roaming\Hex-Rays\IDA Pro\ida-rpc.save
+[IDA RPC 9.2] v9.00 by shigureJ & FightingSquirrel loaded.
+
+  bytes   pages size description
+--------- ----- ---- --------------------------------------------
+   843776   103 8192 allocating memory for b-tree...
+   573440    70 8192 allocating memory for virtual array...
+   262144    32 8192 allocating memory for name pointers...
+-----------------------------------------------------------------
+  1679360            total memory allocated
+
+Loading processor module C:\Program Files\IDA Professional 9.2\procs\pc.dll for metapc...OK
+Loading type libraries...
+Autoanalysis subsystem has been initialized.
+Fusion for IDA 9.2 by FightingSquirrel loaded.
+Database for file 'pseudocode_xrefs_demo.exe' has been loaded.
+Hex-Rays Decompiler plugin has been loaded (v9.2.0.250908)
+  The hotkeys are F5: decompile, Ctrl-F5: decompile all.
+
+  Please check the Edit/Plugins menu for more information.
+[ChunkCodePatcher] Plugin loaded. Hotkey: Ctrl-Shift-C
+LumFix: can't find hexrays.crt file in your IDA folder!
+LumFix: plugin init_hook failed!
+Hex-rays version 9.2.0.250908 has been detected, gooMBA plugin ready to use
+IDAExecFunctions64: Plugin loaded.
+VTable Renderer: Hex-Rays 9.2.0.250908 detected; renderer enabled
+140001090: restored microcode from idb
+140001090: restored pseudocode from idb
+-----------------------------------------------------------------------------------------
+Python 3.10.5 (tags/v3.10.5:f377153, Jun  6 2022, 16:14:13) [MSC v.1929 64 bit (AMD64)] 
+IDAPython 64-bit v9.2.0 (c) The IDAPython Team <idapython@googlegroups.com>
+-----------------------------------------------------------------------------------------
+Flushing buffers, please wait...ok
+Unloading IDP module C:\Program Files\IDA Professional 9.2\procs\pc.dll...

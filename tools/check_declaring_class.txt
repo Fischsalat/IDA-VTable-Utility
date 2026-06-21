@@ -1,5 +1,5 @@
-renamed={'demo_method_0': 'demo_method_0', 'demo_method_1': 'AActor_DeclaredMethod', 'demo_method_2': 'ASomeActor_DeclaredMethod', 'scale_value': 'scale_value'}
-classes={'ASomeActor', 'AActor'}
+renamed={'demo_method_0': 'demo_method_0', 'demo_method_1': 'AActor_HintedMethod', 'demo_method_2': 'ASomeActor_HintedMethod', 'scale_value': 'scale_value'}
+classes={'AActor', 'ASomeActor'}
 rename_ok=True
 x_ok=True
 ok=True

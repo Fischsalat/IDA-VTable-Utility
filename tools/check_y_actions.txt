@@ -1,0 +1,1 @@
+[('pseudocode_xrefs:edit_vtable_function_type', 'Y')]
