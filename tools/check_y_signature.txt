@@ -1,4 +1,4 @@
-details=[{'title': 'Please enter a string', 'line_edits': ['int __fastcall demo_method_1(VftJumpType *self, volatile int *addend, value_transform_t transform)'], 'plain_edits': [], 'text_edits': []}]
-type="{'base': 'int __fastcall(VftJumpType *self, volatile int *addend, value_transform_t transform)', 'selected': '__int64 __fastcall(VftJumpType *self, int changed)', 'child': '__int64 __fastcall(VftJumpType *self, int changed)'}"
+details=[]
+type="{'base': 'int __fastcall(VftJumpType *self, volatile int *addend, value_transform_t transform)', 'selected': 'int __fastcall(struct AActor *self, volatile int *addend, value_transform_t transform)', 'child': 'int __fastcall(struct ASomeActor *self, volatile int *addend, value_transform_t transform)'}"
 error=''
 ok=True

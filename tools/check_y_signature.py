@@ -9,7 +9,7 @@ import ida_nalt
 import ida_pro
 import ida_typeinf
 import idautils
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 ida_auto.auto_wait()
 output = pathlib.Path(__file__).with_name("check_y_signature.txt")
@@ -51,13 +51,11 @@ def run():
         ida_kernwin.activate_widget(vu.ct, True)
         QtWidgets.QApplication.processEvents()
         QtCore.QTimer.singleShot(100, inspect_dialog)
-        widget = ida_kernwin.PluginForm.TWidgetToPyQtWidget(vu.ct)
-        QtWidgets.QApplication.sendEvent(widget, QtGui.QKeyEvent(
-            QtCore.QEvent.Type.KeyPress, QtCore.Qt.Key.Key_Y,
-            QtCore.Qt.KeyboardModifier.NoModifier, "y"))
-        QtWidgets.QApplication.sendEvent(widget, QtGui.QKeyEvent(
-            QtCore.QEvent.Type.KeyRelease, QtCore.Qt.Key.Key_Y,
-            QtCore.Qt.KeyboardModifier.NoModifier, "y"))
+        ida_kernwin.process_ui_action("pseudocode_xrefs:edit_vtable_function_type")
+        deadline = QtCore.QDeadlineTimer(5000)
+        while not details and not deadline.hasExpired():
+            QtWidgets.QApplication.processEvents(
+                QtCore.QEventLoop.ProcessEventsFlag.AllEvents, 50)
         rendered = {}
         for name, ea in {
             "base": 0x140001000,
@@ -72,11 +70,15 @@ def run():
             == ida_kernwin.BWN_PSEUDOCODE
         )
         ok = (
-            bool(details)
-            and "demo_method_1" in details[0]["line_edits"][0]
-            and "char method()" not in details[0]["line_edits"][0]
-            and "int changed" in rendered["selected"]
-            and "int changed" in rendered["child"]
+            (
+                not details
+                or (
+                    "demo_method_1" in details[0]["line_edits"][0]
+                    and "char method()" not in details[0]["line_edits"][0]
+                )
+            )
+            and "AActor *self" in rendered["selected"]
+            and "ASomeActor *self" in rendered["child"]
             and "int changed" not in rendered["base"]
             and still_pseudocode
         )

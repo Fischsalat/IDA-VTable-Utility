@@ -80,7 +80,9 @@ needed.
 
 `Y` starts with the actual prototype from the current class's VTable target. The
 edited declaration is then applied only to implementations inside the selected
-declaration boundary.
+declaration boundary. When the declaration has an explicit first pointer
+argument, each implementation gets that `this`/`self` argument retargeted to the
+implementation class.
 
 ## Requirements
 
